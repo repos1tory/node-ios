@@ -44,7 +44,7 @@ SMOKE_DONE
 | ✅ `fork()` / `child_process` | works (Dopamine `forkfix`) |
 | ✅ **Full JIT (TurboFan) + WebAssembly** | works on the A9 via the mprotect W^X patch (see below) |
 | ✅ **WebAssembly *memory*** (blake3, esbuild-wasm, ...) | works with `--disable-wasm-trap-handler` (required — see Gotchas) |
-| ⚠️ `wrangler` 4.x | works in practice — see the companion [wrangler-ios](https://github.com/al5ina5/wrangler-ios) |
+| ⚠️ `wrangler` 4.x | works in practice — see the companion [wrangler-ios](https://github.com/repos1tory/wrangler-ios) |
 
 The published binary ships **full JIT** — run it with the three flags below.
 
@@ -102,7 +102,7 @@ cap (needed for 2GB+ reservations, e.g. huge ArrayBuffers).
 ## Companion: wrangler on iOS
 
 Wrangler 4.x runs on-device using this node build — see
-**[al5ina5/wrangler-ios](https://github.com/al5ina5/wrangler-ios)** for a one-command installer.
+**[repos1tory/wrangler-ios](https://github.com/repos1tory/wrangler-ios)** for a one-command installer.
 
 ## The patch set
 
@@ -134,7 +134,7 @@ Everything runs in GitHub Actions on a macOS runner. **You don't need a Mac.**
 **One-line install (on the device, jailbroken rootless):**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/al5ina5/node-ios/main/scripts/install-on-device.sh | sh
+curl -fsSL https://raw.githubusercontent.com/repos1tory/node-ios/main/scripts/install-on-device.sh | sh
 ```
 
 That downloads the release binary, signs it with `entitlements.plist` (ldid), installs it to

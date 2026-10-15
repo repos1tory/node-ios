@@ -3,7 +3,7 @@
 #
 # Run ON the device (iPhone/iPad, arm64, iOS 15+, Dopamine-style rootless jb):
 #
-#   curl -fsSL https://raw.githubusercontent.com/al5ina5/node-ios/main/scripts/install-on-device.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/repos1tory/node-ios/main/scripts/install-on-device.sh | sh
 #
 # or from a checkout:
 #
@@ -26,7 +26,7 @@ umask 022
 PREFIX="${PREFIX:-/var/jb}"
 SUDO="${SUDO:-sudo}"
 NODE_TAG="${NODE_TAG:-v22.19.0}"
-REPO="${REPO:-al5ina5/node-ios}"
+REPO="${REPO:-repos1tory/node-ios}"
 BIN="node-${NODE_TAG}-iphoneos-arm64"
 BASE_URL="https://github.com/${REPO}/releases/download/${NODE_TAG}"
 
