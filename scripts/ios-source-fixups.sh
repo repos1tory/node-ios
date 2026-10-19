@@ -226,6 +226,31 @@ replace_once("deps/v8/src/wasm/wasm-code-manager.cc",
       reinterpret_cast<void*>(region.begin()), region.size(),
       PageAllocator::kReadWriteExecute);
 #endif''', "V8 Wasm recommit")
+
+# On Darwin, generic RecommitPages is normally madvise-only because MAP_JIT
+# mappings keep fixed permissions. Our iOS mapping is not MAP_JIT, so restore
+# the requested RW permission explicitly before V8's later RW->RX scope flip.
+path = "deps/v8/src/base/platform/platform-posix.cc"
+source = open(path).read()
+old = '''bool OS::RecommitPages(void* address, size_t size, MemoryPermission access) {
+  DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % CommitPageSize());
+  DCHECK_EQ(0, size % CommitPageSize());
+
+#if defined(V8_OS_DARWIN)'''
+new = '''bool OS::RecommitPages(void* address, size_t size, MemoryPermission access) {
+  DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % CommitPageSize());
+  DCHECK_EQ(0, size % CommitPageSize());
+
+#if defined(V8_OS_IOS)
+  return SetPermissions(address, size, access);
+#endif
+
+#if defined(V8_OS_DARWIN)'''
+if old in source:
+    open(path, "w").write(source.replace(old, new, 1))
+elif "#if defined(V8_OS_IOS)\n  return SetPermissions(address, size, access);" not in source:
+    raise SystemExit("V8 iOS RecommitPages permission anchor changed")
+
 print("fixup: Node 26 V8 iOS mprotect W^X enabled for shared JS/Wasm cage")
 PY
 # --- c-ares ---
