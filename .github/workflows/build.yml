@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14 # arm64 host == arm64 target; different OS/sysroot
+    runs-on: macos-15 # Node 26 V8 uses std::atomic_ref; Xcode 16 libc++ provides it
     timeout-minutes: 180
     env:
       NODE_REF: ${{ github.event.inputs.node_ref || 'v26.4.0' }}
