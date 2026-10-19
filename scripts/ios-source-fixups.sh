@@ -20,9 +20,12 @@ s = open(p).read()
 orig = s
 s = s.replace(" -Wl,--start-group", "").replace(" -Wl,--end-group", "")
 if s == orig:
-    raise SystemExit("make.py --start-group strip matched nothing — Node layout changed?")
-open(p, "w").write(s)
-print("fixup: stripped -Wl,--start-group/--end-group from gyp make link templates")
+    if "-Wl,--start-group" in s or "-Wl,--end-group" in s:
+        raise SystemExit("make.py --start-group strip matched nothing — Node layout changed?")
+    print("fixup: gyp make link templates already have no GNU group flags")
+else:
+    open(p, "w").write(s)
+    print("fixup: stripped -Wl,--start-group/--end-group from gyp make link templates")
 PY
 
 # --- Node crypto: macOS-only keychain CA reader ---
@@ -39,9 +42,12 @@ if "TargetConditionals.h" not in s:
     s = "#if defined(__APPLE__)\n#include <TargetConditionals.h>\n#endif\n" + s
 s = s.replace("#ifdef __APPLE__", "#if defined(__APPLE__) && TARGET_OS_OSX")
 if s == orig:
-    raise SystemExit("crypto_context.cc fixup matched nothing — Node layout changed?")
-open(f, "w").write(s)
-print("fixup: crypto_context.cc macOS keychain code guarded with TARGET_OS_OSX")
+    if "TARGET_OS_OSX" not in s:
+        raise SystemExit("crypto_context.cc fixup matched nothing — Node layout changed?")
+    print("fixup: crypto_context.cc macOS guards already use TARGET_OS_OSX")
+else:
+    open(f, "w").write(s)
+    print("fixup: crypto_context.cc macOS keychain code guarded with TARGET_OS_OSX")
 PY
 
 # --- link Darwin frameworks on iOS ---
@@ -63,9 +69,10 @@ inject = ("['OS==\"ios\"', {\n"
           "        ] },\n"
           "      }],\n"
           "      ") + anchor
-if anchor not in s:
+if anchor not in s and "repos1tory-node-ios-frameworks" not in s:
     raise SystemExit("common.gypi anchor not found — Node layout changed?")
-if "OS==\"ios\"" not in s:
+if "repos1tory-node-ios-frameworks" not in s:
+    inject = inject.replace("['OS==\"ios\"', {", "['OS==\"ios\"', { # repos1tory-node-ios-frameworks", 1)
     s = s.replace(anchor, inject, 1)
 open(f, "w").write(s)
 print("fixup: common.gypi links CoreFoundation/CoreServices/Security on iOS")
@@ -85,45 +92,35 @@ s = s.replace(
     "#if V8_OS_DARWIN && !defined(V8_OS_IOS)\n  // MAP_JIT is required to obtain writable and executable pages when the",
 )
 if s == orig:
-    raise SystemExit("V8 MAP_JIT fixup matched nothing — V8 layout changed?")
-open(f, "w").write(s)
-print("fixup: V8 no longer uses MAP_JIT on iOS (falls back to plain pages + mprotect W^X)")
+    if "#if V8_OS_DARWIN && !defined(V8_OS_IOS)" not in s:
+        raise SystemExit("V8 MAP_JIT fixup matched nothing — V8 layout changed?")
+    print("fixup: V8 iOS MAP_JIT exclusion already applied")
+else:
+    open(f, "w").write(s)
+    print("fixup: V8 no longer uses MAP_JIT on iOS (falls back to plain pages + mprotect W^X)")
 PY
 
-# --- V8: full JIT on pre-APRR iOS (A9/A10) via mprotect W^X ---
-# V8 only WRAPS its code-space writes (allocation, free-list, GC, patching) in
-# "make-writable-first" scopes when V8_HAS_PTHREAD_JIT_WRITE_PROTECT is set — which
-# build_config.h hard-codes OFF for real iOS devices (on only for macOS + iOS simulator).
-# With it off, V8 assumes code memory is permanently RWX and writes unguarded; those writes
-# then fault the instant a page is RX (observed on-device: EXC_BAD_ACCESS code=2, a WRITE
-# fault, in FreeListManyCachedFastPathBase::Allocate during Sparkplug code allocation).
-# Fix, 4 files:
-#   (A) turn the macro ON for iOS device too -> activates ALL of V8's write wrapping
-#       (the machinery is already correct for APRR Macs; it was just switched off).
-#   (B/C) reroute the actual flip primitive from pthread_jit_write_protect_np (a no-op on
-#       the A9) to mprotect over the registered code range.
-#   (D) register that bounded code region, and skip the macOS-only RWX code-range setup on
-#       iOS (iOS rejects RWX; committed code pages start RW).
-# Run node --predictable so the process-wide mprotect flip has no W^X race with a
-# background compiler thread.
+# --- V8: Node 26 full JIT on pre-APRR iOS via mprotect W^X ---
+# BrowserEngineCore JIT is unavailable at iOS 15; use V8 write scopes with
+# the port's mprotect backend over the shared JS/Wasm code cage.
 python3 - <<'PY'
-def patch(path, anchor, inject):
-    s = open(path).read()
-    if anchor not in s:
-        raise SystemExit("anchor NOT found in " + path + " :: " + repr(anchor[:70]))
-    open(path, "w").write(s.replace(anchor, inject, 1))
+def replace_once(path, old, new, label):
+    source = open(path).read()
+    if old not in source:
+        if new in source:
+            return
+        raise SystemExit(f"{label}: expected Node 26 anchor missing")
+    open(path, "w").write(source.replace(old, new, 1))
 
-# (A) build_config.h: enable the pthread-JIT-write-protect macro on iOS device too.
-patch("deps/v8/src/base/build_config.h",
-'''#if defined(V8_HOST_ARCH_ARM64) && \\
-    (defined(V8_OS_MACOS) || (defined(V8_OS_IOS) && TARGET_OS_SIMULATOR))
+replace_once("deps/v8/src/base/build_config.h",
+'''// pthread_jit_write_protect is only available on arm64 Mac.
+#if defined(V8_HOST_ARCH_ARM64) && defined(V8_OS_MACOS)
 #define V8_HAS_PTHREAD_JIT_WRITE_PROTECT 1''',
-'''#if defined(V8_HOST_ARCH_ARM64) && \\
-    (defined(V8_OS_MACOS) || defined(V8_OS_IOS))
-#define V8_HAS_PTHREAD_JIT_WRITE_PROTECT 1''')
+'''// The iOS port supplies an mprotect-backed implementation.
+#if defined(V8_HOST_ARCH_ARM64) && (defined(V8_OS_MACOS) || defined(V8_OS_IOS))
+#define V8_HAS_PTHREAD_JIT_WRITE_PROTECT 1''', "V8 JIT feature gate")
 
-# (B) platform.h: declare RegisterJitRange alongside SetJitWriteProtected.
-patch("deps/v8/src/base/platform/platform.h",
+replace_once("deps/v8/src/base/platform/platform.h",
 '''#if V8_HAS_PTHREAD_JIT_WRITE_PROTECT
 V8_BASE_EXPORT void SetJitWriteProtected(int enable);
 #endif''',
@@ -132,163 +129,117 @@ V8_BASE_EXPORT void SetJitWriteProtected(int enable);
 #if defined(V8_OS_IOS)
 V8_BASE_EXPORT void RegisterJitRange(void* base, size_t size);
 #endif
-#endif''')
+#endif''', "V8 JIT declarations")
 
-# (C) platform-darwin.cc: on iOS the flip is done directly with mprotect (exactly
-# what the on-device probe validated) over the registered range. The stock definition
-# is guarded to NON-iOS; add the iOS one after its #endif.
-patch("deps/v8/src/base/platform/platform-darwin.cc",
-'''V8_BASE_EXPORT void SetJitWriteProtected(int enable) {
+# Keep APRR on macOS; use mprotect over registered ranges on iOS.
+path = "deps/v8/src/base/platform/platform-darwin.cc"
+source = open(path).read()
+if "V8_BASE_EXPORT void RegisterJitRange(void* base, size_t size)" not in source:
+    old = '''V8_BASE_EXPORT void SetJitWriteProtected(int enable) {
   pthread_jit_write_protect_np(enable);
 }
 
 #pragma clang diagnostic pop
-#endif''',
-'''V8_BASE_EXPORT void SetJitWriteProtected(int enable) {
+#endif'''
+    new = '''V8_BASE_EXPORT void SetJitWriteProtected(int enable) {
   pthread_jit_write_protect_np(enable);
 }
 
 #pragma clang diagnostic pop
 #endif
+
 #if V8_HAS_PTHREAD_JIT_WRITE_PROTECT && defined(V8_OS_IOS)
-// Real iOS arm64 (A9/A10) enforces W^X even for dynamic-codesigning processes:
-// pthread_jit_write_protect_np is a no-op and an RWX request is silently
-// downgraded to RW. So flip each registered code range RW<->RX via mprotect.
-// There are SEVERAL such ranges: the JS code range (registered in code-range.cc)
-// and every committed WASM code region (registered in wasm-code-manager.cc) --
-// WASM has its own code space that the single JS range does not cover, so a
-// one-range flip leaves WASM pages RW and their jump table faults on execute.
-// Nesting is handled by RwxMemoryWriteScope, which calls this only at the
-// outermost level. Run node --predictable --single-threaded so the process-wide
-// flip has no W^X race with a background compiler thread.
 namespace {
-struct JitRange {
-  void* base;
-  size_t size;
-};
+struct JitRange { void* base; size_t size; };
 constexpr int kMaxJitRanges = 256;
 JitRange g_jit_ranges[kMaxJitRanges];
 int g_jit_range_count = 0;
-}  // namespace
+}
 V8_BASE_EXPORT void RegisterJitRange(void* base, size_t size) {
-  if (base == nullptr || size == 0) return;
-  for (int i = 0; i < g_jit_range_count; i++) {
+  if (!base || !size) return;
+  for (int i = 0; i < g_jit_range_count; ++i) {
     if (g_jit_ranges[i].base == base) {
       g_jit_ranges[i].size = size;
       return;
     }
   }
-  if (g_jit_range_count < kMaxJitRanges) {
-    g_jit_ranges[g_jit_range_count].base = base;
-    g_jit_ranges[g_jit_range_count].size = size;
-    g_jit_range_count++;
-  }
+  if (g_jit_range_count < kMaxJitRanges)
+    g_jit_ranges[g_jit_range_count++] = {base, size};
 }
 V8_BASE_EXPORT void SetJitWriteProtected(int enable) {
-  int prot = enable ? (PROT_READ | PROT_EXEC) : (PROT_READ | PROT_WRITE);
-  for (int i = 0; i < g_jit_range_count; i++) {
-    // Best-effort: a registered range can be unmapped during isolate/heap
-    // teardown while still listed here, after which mprotect fails harmlessly
-    // (observed on-device: a CHECK_EQ abort in Heap::TearDown *after* the script
-    // ran fine). The flip is proven to succeed for live ranges during operation,
-    // so on failure just drop the now-freed range instead of aborting.
+  const int prot = enable ? (PROT_READ | PROT_EXEC) : (PROT_READ | PROT_WRITE);
+  for (int i = 0; i < g_jit_range_count; ++i) {
     if (mprotect(g_jit_ranges[i].base, g_jit_ranges[i].size, prot) != 0) {
       g_jit_ranges[i] = g_jit_ranges[--g_jit_range_count];
-      i--;
+      --i;
     }
   }
 }
-#endif''')
+#endif'''
+    if old not in source:
+        raise SystemExit("V8 Darwin write-protect anchor missing")
+    open(path, "w").write(source.replace(old, new, 1))
 
-# (D0) code-range.cc: pull in platform.h so ::v8::base::RegisterJitRange is
-# declared (allocation.h, already included, does not transitively provide it).
-patch("deps/v8/src/heap/code-range.cc",
-'''#include "src/utils/allocation.h"''',
-'''#include "src/utils/allocation.h"
-#include "src/base/platform/platform.h"''')
-
-# (D) code-range.cc: on iOS skip the macOS-only RWX code-range setup (iOS rejects
-# RWX and CHECK_EQ(reserved_area,0) may not hold) and instead register the bounded
-# code region for the mprotect flip. Committed code pages start RW.
-patch("deps/v8/src/heap/code-range.cc",
-'''  if (V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT &&
-      params.jit == JitPermission::kMapAsJittable) {''',
-'''#if !defined(V8_OS_IOS)
-  if (V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT &&
-      params.jit == JitPermission::kMapAsJittable) {''')
-
-patch("deps/v8/src/heap/code-range.cc",
-'''    if (!params.page_allocator->DiscardSystemPages(base, size)) return false;
-  }
-  return true;
-}''',
-'''    if (!params.page_allocator->DiscardSystemPages(base, size)) return false;
-  }
-#else
-  ::v8::base::RegisterJitRange(
-      reinterpret_cast<void*>(page_allocator_->begin()),
-      page_allocator_->size());
+# Register the shared code cage; Node 26 allocates JS and Wasm there on iOS.
+path = "deps/v8/src/heap/code-range.cc"
+source = open(path).read()
+if '#include "src/base/platform/platform.h"' not in source:
+    old = '#include "src/base/once.h"'
+    if old not in source:
+        raise SystemExit("V8 CodeRange include anchor missing")
+    source = source.replace(old, old + '\n#include "src/base/platform/platform.h"', 1)
+reg = '''#if defined(V8_OS_IOS) && V8_HAS_PTHREAD_JIT_WRITE_PROTECT
+  ::v8::base::RegisterJitRange(reinterpret_cast<void*>(page_allocator_->begin()),
+                               page_allocator_->size());
 #endif
   return true;
-}''')
+}'''
+if reg not in source:
+    old = '#endif  // !defined(V8_OS_WIN)\n\n  return true;\n}'
+    if old not in source:
+        raise SystemExit("V8 CodeRange registration anchor missing")
+    source = source.replace(old, '#endif  // !defined(V8_OS_WIN)\n\n' + reg, 1)
+open(path, "w").write(source)
 
-# (E) wasm-code-manager.cc: WASM has its OWN code space (separate from the JS
-# code range), committed via WasmCodeManager::Commit with kReadWriteExecute. On
-# iOS that RWX request is silently downgraded to RW, so WASM code is never
-# executable -> its jump table faults on the first call (observed on-device:
-# EXC_BAD_ACCESS code=2 executing a RW WASM jump-table page, right after
-# WebAssembly.Module compiles). WASM code writes already go through
-# RwxMemoryWriteScope -> base::SetJitWriteProtected (same chain the JS JIT uses),
-# so the ONLY missing piece is that the WASM region isn't in the flip's range
-# set. Fix: commit the WASM region RW (not the downgraded RWX) and register it,
-# so the same mprotect W^X flip toggles it RW<->RX exactly like the JS range.
-#
-# (E1) request kReadWrite on iOS instead of kReadWriteExecute.
-patch("deps/v8/src/wasm/wasm-code-manager.cc",
-'''  // Allocate with RWX permissions; this will be restricted via PKU if
-  // available and enabled.
-  PageAllocator::Permission permission = PageAllocator::kReadWriteExecute;''',
-'''  // Allocate with RWX permissions; this will be restricted via PKU if
-  // available and enabled.
-#if defined(V8_OS_IOS)
-  // iOS enforces W^X even for dynamic-codesigning processes: an RWX request is
-  // silently downgraded to RW, so WASM code would never become executable.
-  // Commit RW and register the region (below) with the same mprotect W^X flip
-  // the JS code range uses.
-  PageAllocator::Permission permission = PageAllocator::kReadWrite;
+# Node 26 recommits executable JS pages via this helper.
+replace_once("deps/v8/src/heap/memory-allocator.cc",
+'''    return vm->RecommitPages(start, chunk_size,
+                             PageAllocator::kReadWriteExecute);''',
+'''#if defined(V8_OS_IOS)
+    return vm->RecommitPages(start, chunk_size, PageAllocator::kReadWrite);
 #else
-  PageAllocator::Permission permission = PageAllocator::kReadWriteExecute;
-#endif''')
+    return vm->RecommitPages(start, chunk_size,
+                             PageAllocator::kReadWriteExecute);
+#endif''', "V8 executable MemoryChunk recommit")
 
-# (E2) after the (non-PKU) commit succeeds, register the WASM region for the flip.
-patch("deps/v8/src/wasm/wasm-code-manager.cc",
-'''    success = SetPermissions(GetPlatformPageAllocator(), region.begin(),
-                             region.size(), permission);
-  }
-
-  if (V8_UNLIKELY(!success)) {''',
-'''    success = SetPermissions(GetPlatformPageAllocator(), region.begin(),
-                             region.size(), permission);
-#if defined(V8_OS_IOS)
-    if (success) {
-      ::v8::base::RegisterJitRange(reinterpret_cast<void*>(region.begin()),
-                                   region.size());
-    }
-#endif
-  }
-
-  if (V8_UNLIKELY(!success)) {''')
-
-print("fixup: iOS full-JIT via mprotect W^X (multi-range flip; JS code range + WASM code regions; build_config/platform.h/platform-darwin/code-range/wasm-code-manager)")
+# Node 26's Wasm code lives in the same shared code cage.
+replace_once("deps/v8/src/wasm/wasm-code-manager.cc",
+'''  bool success = GetPageAllocator()->RecommitPages(
+      reinterpret_cast<void*>(region.begin()), region.size(),
+      PageAllocator::kReadWriteExecute);''',
+'''#if defined(V8_OS_IOS)
+  bool success = GetPageAllocator()->RecommitPages(
+      reinterpret_cast<void*>(region.begin()), region.size(),
+      PageAllocator::kReadWrite);
+#else
+  bool success = GetPageAllocator()->RecommitPages(
+      reinterpret_cast<void*>(region.begin()), region.size(),
+      PageAllocator::kReadWriteExecute);
+#endif''', "V8 Wasm recommit")
+print("fixup: Node 26 V8 iOS mprotect W^X enabled for shared JS/Wasm cage")
 PY
-
 # --- c-ares ---
 # Node's cares.gyp uses config/darwin for both mac and ios, but the iOS SDK does NOT
 # ship <sys/random.h> (it has arc4random_buf instead). Undef the header macro so
 # ares_rand.c falls back to arc4random_buf (HAVE_ARC4RANDOM_BUF is already defined).
 if grep -q '#define HAVE_SYS_RANDOM_H 1' deps/cares/config/darwin/ares_config.h; then
-  sed -i.bak 's|#define HAVE_SYS_RANDOM_H 1|/* undef HAVE_SYS_RANDOM_H (iOS SDK lacks it) */|' \
-    deps/cares/config/darwin/ares_config.h
+  python3 - "deps/cares/config/darwin/ares_config.h" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+text = text.replace('#define HAVE_SYS_RANDOM_H 1', '/* undef HAVE_SYS_RANDOM_H (iOS SDK lacks it) */')
+open(path, 'w').write(text)
+PY
   echo "fixup: c-ares HAVE_SYS_RANDOM_H undef'd"
 fi
 

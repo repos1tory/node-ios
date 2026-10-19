@@ -7,12 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       node_ref:
-        description: "Node.js git tag to build (e.g. v22.19.0)"
-        default: "v22.19.0"
-  push:
-    paths:
-      - ".github/workflows/build.yml"
-      - "scripts/ios-source-fixups.sh"
+        description: "Node.js git tag to build (e.g. v26.4.0)"
+        default: "v26.4.0"
+      publish_release:
+        description: "Publish the built binary as a GitHub prerelease"
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: write
@@ -20,9 +21,9 @@ permissions:
 jobs:
   build:
     runs-on: macos-14 # arm64 host == arm64 target; different OS/sysroot
-    timeout-minutes: 120
+    timeout-minutes: 180
     env:
-      NODE_REF: ${{ github.event.inputs.node_ref || 'v22.19.0' }}
+      NODE_REF: ${{ github.event.inputs.node_ref || 'v26.4.0' }}
       IOS_MIN: "15.0"
     steps:
       - uses: actions/checkout@v4
@@ -105,7 +106,18 @@ jobs:
           ldid -S../entitlements.plist out/Release/node
           echo "size: $(du -h out/Release/node | cut -f1)"
 
+      - name: Upload candidate binary for on-device checks
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-${{ env.NODE_REF }}-iphoneos-arm64-candidate
+          path: |
+            node-src/out/Release/node
+            entitlements.plist
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Publish to release
+        if: ${{ inputs.publish_release }}
         env:
           GH_TOKEN: ${{ github.token }}
         working-directory: node-src
