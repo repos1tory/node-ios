@@ -105,15 +105,11 @@ jobs:
           ldid -S../entitlements.plist out/Release/node
           echo "size: $(du -h out/Release/node | cut -f1)"
 
-      - name: Publish to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        working-directory: node-src
-        run: |
-          set -euxo pipefail
-          cp out/Release/node "node-${NODE_REF}-iphoneos-arm64"
-          gh release view "$NODE_REF" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$NODE_REF" -R "$GITHUB_REPOSITORY" \
-                 --title "Node $NODE_REF for iOS arm64" \
-                 --notes "Cross-compiled Node $NODE_REF for jailbroken iOS 15 arm64, with full JIT (JavaScript + WebAssembly) on the A9 via mprotect W^X. Run with --predictable --single-threaded for JIT; --jitless is available as a fallback." --prerelease
-          gh release upload "$NODE_REF" "node-${NODE_REF}-iphoneos-arm64" ../entitlements.plist --clobber -R "$GITHUB_REPOSITORY"
+      - name: Upload experimental binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-ios-a10-experimental
+          path: |
+            node-src/out/Release/node
+            entitlements.plist
+          retention-days: 14
