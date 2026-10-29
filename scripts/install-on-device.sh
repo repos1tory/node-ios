@@ -1,7 +1,7 @@
 #!/bin/sh
 # install-on-device.sh — install node-ios on a jailbroken (rootless) iOS device.
 #
-# Run ON the device (iPhone/iPad, arm64, iOS 15+, Dopamine-style rootless jb):
+# Run ON the device (iPhone/iPad, arm64, iOS 15+, Dopamine or palera1n rootless):
 #
 #   curl -fsSL https://raw.githubusercontent.com/repos1tory/node-ios/main/scripts/install-on-device.sh | sh
 #
@@ -10,7 +10,7 @@
 #   sh scripts/install-on-device.sh
 #
 # What it does:
-#   1. downloads node-v22.19.0-iphoneos-arm64 + entitlements.plist from the GitHub release
+#   1. downloads the verified Node 22.19.0 binary + entitlements from the GitHub release
 #   2. signs the binary with ldid (dynamic-codesigning + extended virtual addressing)
 #   3. installs it to $PREFIX/usr/lib/node-ios/node
 #   4. writes a $PREFIX/usr/bin/node shim that ALWAYS passes the required flags:
@@ -19,16 +19,18 @@
 #
 # Requires: sudo (device is rootless; /var/jb is root-owned), ldid, curl.
 #
-# Env overrides: PREFIX (default /var/jb), SUDO (default "sudo"), NODE_TAG (default v22.19.0)
+# Env overrides: PREFIX (default /var/jb), SUDO (default "sudo"),
+#   NODE_VERSION (default 22.19.0), NODE_RELEASE_TAG (default v22.19.0-ios1)
 set -eu
 umask 022
 
 PREFIX="${PREFIX:-/var/jb}"
 SUDO="${SUDO:-sudo}"
-NODE_TAG="${NODE_TAG:-v22.19.0}"
+NODE_VERSION="${NODE_VERSION:-22.19.0}"
+NODE_RELEASE_TAG="${NODE_RELEASE_TAG:-${NODE_TAG:-v22.19.0-ios1}}"
 REPO="${REPO:-repos1tory/node-ios}"
-BIN="node-${NODE_TAG}-iphoneos-arm64"
-BASE_URL="https://github.com/${REPO}/releases/download/${NODE_TAG}"
+BIN="node-${NODE_VERSION}-iphoneos-arm64"
+BASE_URL="https://github.com/${REPO}/releases/download/${NODE_RELEASE_TAG}"
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf 'error: %s\n' "$*" >&2; exit 1; }
