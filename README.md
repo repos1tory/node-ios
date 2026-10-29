@@ -6,7 +6,7 @@
 
 *A standalone mainline Node.js 22 CLI for jailbroken iOS, cross-compiled entirely in GitHub Actions. No Mac required.*
 
-[![build](https://github.com/j0shua-SYSON/node-ios/actions/workflows/build.yml/badge.svg)](https://github.com/j0shua-SYSON/node-ios/actions/workflows/build.yml)
+[![build](https://github.com/repos1tory/node-ios/actions/workflows/build.yml/badge.svg)](https://github.com/repos1tory/node-ios/actions/workflows/build.yml)
 ![platform](https://img.shields.io/badge/target-iOS%2015%2B%20·%20arm64%20·%20rootless-black)
 ![node](https://img.shields.io/badge/Node.js-22.19.0-339933?logo=node.js&logoColor=white)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -15,9 +15,9 @@
 
 ---
 
-This repo cross-compiles **mainline Node 22.19** to a standalone `iphoneos-arm64` binary that runs on a
-**jailbroken iPhone**, proven on an **iPhone 6s Plus (Apple A9), iOS 15.8.5, Dopamine**. Everything is
-built in GitHub Actions from a small, commented patch set. No Mac required.
+This repo cross-compiles **mainline Node 22.19** to a standalone `iphoneos-arm64` binary for
+**rootless Dopamine and palera1n iPhones and iPads**. The build is produced in GitHub Actions from a
+small, commented patch set. No Mac is required.
 
 ## It actually runs (real output from the device)
 
@@ -89,6 +89,12 @@ The repo's `entitlements.plist` also requests
 `com.apple.developer.kernel.extended-virtual-addressing`, which lifts iOS's default per-process VA
 cap (needed for 2GB+ reservations, e.g. huge ArrayBuffers).
 
+The iOS V8 snapshot must not inherit optional ARM instructions from the Apple Silicon build host.
+The build masks those host-only feature bits for the iOS target and includes a device smoke check for
+the affected atomic operations. The matching Debian package is versioned independently from Node;
+packages that run Node on-device should depend on the current `nodejs` package in the
+[repos1tory Sileo repo](https://repos1tory.github.io/) instead of bundling their own runtime.
+
 ### Two more iOS quirks you'll hit with real tools
 
 - **There is no `/bin/sh`** on rootless jailbreaks (the rootfs is read-only; the shell lives at
@@ -124,20 +130,22 @@ described above.)
 
 Everything runs in GitHub Actions on a macOS runner. **You don't need a Mac.**
 
-1. Fork this repo.
-2. Actions → **build** → *Run workflow* (pick a `node_ref`, default `v22.19.0`).
-   The first run is slow (~80 min: a full V8 compile); it warms a ccache so re-runs are faster.
-3. Grab `node-<ver>-iphoneos-arm64` from the resulting Release.
+1. Actions → **build** → *Run workflow* (pick a `node_ref`, default `v22.19.0`, and a Debian
+   `package_revision`). The first run is slow (~80 min: a full V8 compile); it warms a ccache so
+   re-runs are faster.
+2. Download the workflow artifact and run `smoke.mjs` plus `jit-test.mjs` on a physical device.
+3. After device verification, publish the binary and `.deb` under a new release tag, then run the
+   repos1tory `publish package` workflow to refresh the Sileo index.
 
 ## Run it on your device
 
-**One-line install (on the device, jailbroken rootless):**
+**One-line install (on the device, Dopamine or palera1n rootless):**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/repos1tory/node-ios/main/scripts/install-on-device.sh | sh
 ```
 
-That downloads the release binary, signs it with `entitlements.plist` (ldid), installs it to
+That downloads the verified release binary, signs it with `entitlements.plist` (ldid), installs it to
 `/var/jb/usr/lib/node-ios/`, and writes a `/var/jb/usr/bin/node` shim that always passes the three
 required flags. Then just:
 

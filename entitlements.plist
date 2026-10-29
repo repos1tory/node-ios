@@ -7,6 +7,6 @@
   <key>get-task-allow</key><true/>
   <!-- Lifts iOS's default per-process virtual-address limit. Without this, large
        reservations fail (2GB+ ArrayBuffers, big wasm memories). Complements
-       --disable-wasm-trap-handler, which avoids V8's 10GB guarded reservation. -->
+       the wasm trap-handler flag, which avoids V8's 10GB guarded reservation. -->
   <key>com.apple.developer.kernel.extended-virtual-addressing</key><true/>
 </dict></plist>
